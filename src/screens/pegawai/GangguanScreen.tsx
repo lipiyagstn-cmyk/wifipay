@@ -1,7 +1,9 @@
-import React, { useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { Image, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { getComplaintReports, subscribeToComplaintReports, updateComplaintReportStatus } from '../../complaintStore';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { getComplaintReports, loadComplaintReports, subscribeToComplaintReports, updateComplaintReportStatus } from '../../complaintStore';
+import { getApiErrorMessage } from '../../services/api';
 
 type IssueStatus = 'Baru' | 'Diproses' | 'Selesai';
 type IssueFilter = 'Semua' | 'Baru' | 'Diproses';
@@ -11,18 +13,11 @@ type Issue = {
   customer: string;
   address: string;
   time: string;
-  priority: 'Tinggi' | 'Sedang' | 'Rendah';
+  priority: 'Tinggi' | 'Sedang' | 'Rendah' | null;
   status: IssueStatus;
   detail?: string;
   photoUri?: string | null;
-  customerReported?: boolean;
 };
-
-const initialIssues: Issue[] = [
-  { id: 'GNG-0261', title: 'Sinyal internet tidak stabil', customer: 'Budi Santoso', address: 'Sukajadi, Bandung', time: '09.14', priority: 'Tinggi', status: 'Baru' },
-  { id: 'GNG-0258', title: 'Router sering memulai ulang', customer: 'Siti Rahma', address: 'Dago, Bandung', time: '08.42', priority: 'Sedang', status: 'Diproses' },
-  { id: 'GNG-0252', title: 'Kecepatan internet menurun', customer: 'Arman Hidayat', address: 'Antapani, Bandung', time: 'Kemarin, 16.20', priority: 'Rendah', status: 'Selesai' },
-];
 
 const filters: IssueFilter[] = ['Semua', 'Baru', 'Diproses'];
 
@@ -33,42 +28,46 @@ const statusColors: Record<IssueStatus, { text: string; background: string }> = 
 };
 
 export default function GangguanScreen() {
-  const [issues, setIssues] = useState(initialIssues);
   const [activeFilter, setActiveFilter] = useState<IssueFilter>('Semua');
+  const [apiError, setApiError] = useState('');
   const customerReports = useSyncExternalStore(subscribeToComplaintReports, getComplaintReports, getComplaintReports);
-  const reportedIssues: Issue[] = customerReports.map((report) => ({
-    id: report.id,
-    title: report.category,
-    customer: `${report.customer} · ${report.customerId}`,
-    address: report.address,
-    time: `${report.createdAt}, ${report.time}`,
-    priority: report.priority,
-    status: report.status,
-    detail: report.detail,
-    photoUri: report.photoUri,
-    customerReported: true,
-  }));
-  const allIssues = [...reportedIssues, ...issues];
-  const filteredIssues = useMemo(
-    () => allIssues.filter((issue) => activeFilter === 'Semua' || issue.status === activeFilter),
-    [activeFilter, customerReports, issues],
-  );
-  const activeCount = allIssues.filter((issue) => issue.status !== 'Selesai').length;
 
-  const advanceIssue = (id: string) => {
-    if (customerReports.some((report) => report.id === id)) {
-      const issue = customerReports.find((report) => report.id === id);
-      if (issue) updateComplaintReportStatus(id, issue.status === 'Baru' ? 'Diproses' : 'Selesai');
-      return;
+  useEffect(() => {
+    void loadComplaintReports().catch((error: unknown) => setApiError(getApiErrorMessage(error)));
+  }, []);
+  const reportedIssues = useMemo<Issue[]>(
+    () => customerReports.map((report) => ({
+      id: report.id,
+      title: report.category,
+      customer: `${report.customer} · ${report.customerId}`,
+      address: report.address,
+      time: [report.createdAt, report.time].filter(Boolean).join(', '),
+      priority: report.priority,
+      status: report.status,
+      detail: report.detail,
+      photoUri: report.photoUri,
+    })),
+    [customerReports],
+  );
+  const filteredIssues = useMemo(
+    () => reportedIssues.filter((issue) => activeFilter === 'Semua' || issue.status === activeFilter),
+    [activeFilter, reportedIssues],
+  );
+  const activeCount = reportedIssues.filter((issue) => issue.status !== 'Selesai').length;
+
+  const advanceIssue = async (id: string) => {
+    const issue = customerReports.find((report) => report.id === id);
+    if (!issue) return;
+    try {
+      await updateComplaintReportStatus(id, issue.status === 'Baru' ? 'Diproses' : 'Selesai');
+      setApiError('');
+    } catch (error: unknown) {
+      setApiError(getApiErrorMessage(error));
     }
-    setIssues((current) => current.map((issue) => {
-      if (issue.id !== id) return issue;
-      return { ...issue, status: issue.status === 'Baru' ? 'Diproses' : 'Selesai' };
-    }));
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View>
@@ -79,6 +78,7 @@ export default function GangguanScreen() {
             <Ionicons name="warning-outline" size={22} color="#2563EB" />
           </View>
         </View>
+        {apiError ? <Text accessibilityRole="alert" style={styles.apiError}>{apiError}</Text> : null}
 
         <View style={styles.summaryCard}>
           <View style={styles.summaryCopy}>
@@ -124,13 +124,6 @@ export default function GangguanScreen() {
               <Text style={styles.issueTitle}>{issue.title}</Text>
               <Text style={styles.customer}>{issue.customer}</Text>
 
-              {issue.customerReported && (
-                <View style={styles.customerReportTag}>
-                  <Ionicons name="person-outline" size={12} color="#0F766E" />
-                  <Text style={styles.customerReportTagText}>Laporan dari pelanggan</Text>
-                </View>
-              )}
-
               {issue.photoUri && <Image source={{ uri: issue.photoUri }} style={styles.reportPhoto} />}
               {issue.detail && <Text style={styles.reportDetail}>{issue.detail}</Text>}
 
@@ -142,7 +135,7 @@ export default function GangguanScreen() {
                 <Ionicons name="time-outline" size={15} color="#8492A4" />
                 <Text style={styles.metaText}>Dilaporkan {issue.time}</Text>
                 <Text style={styles.priorityLabel}>Prioritas</Text>
-                <Text style={[styles.priorityValue, { color: priorityColor }]}>{issue.priority}</Text>
+                <Text style={[styles.priorityValue, { color: priorityColor }]}>{issue.priority ?? '-'}</Text>
               </View>
 
               {issue.status !== 'Selesai' && (
@@ -168,7 +161,7 @@ export default function GangguanScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F4F7FB' },
+  safeArea: { flex: 1, backgroundColor: '#F7F9FC' },
   content: { paddingHorizontal: 18, paddingTop: 15, paddingBottom: 28 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 17 },
   title: { color: '#172F49', fontSize: 21, fontWeight: '800' },
@@ -206,4 +199,5 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', paddingVertical: 32, paddingHorizontal: 20, backgroundColor: '#FFFFFF', borderRadius: 16 },
   emptyTitle: { color: '#294057', fontSize: 13, fontWeight: '700', marginTop: 9 },
   emptySubtitle: { color: '#8492A4', fontSize: 11, marginTop: 4, textAlign: 'center' },
+  apiError: { color: '#B54747', fontSize: 11, lineHeight: 16, marginBottom: 12 },
 });

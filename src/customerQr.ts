@@ -5,29 +5,33 @@ export type CustomerAddressQrPayload = {
   type: 'customer-address';
   version: 1;
   customerId: string;
-  name: string;
-  address: string;
+  name?: string;
+  address?: string;
   package?: string;
   status?: Customer['status'];
 };
 
 export function createCustomerAddressQr(customer: Customer): string {
-  const payload: CustomerAddressQrPayload = {
-    app: 'WiFiPay',
-    type: 'customer-address',
-    version: 1,
-    customerId: customer.id,
-    name: customer.name,
-    address: customer.address,
-    package: customer.package,
-    status: customer.status,
-  };
-  return JSON.stringify(payload);
+  return customer.id;
 }
 
 export function parseCustomerAddressQr(value: string): CustomerAddressQrPayload | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (!trimmed.startsWith('{')) {
+    return /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(trimmed)
+      ? {
+        app: 'WiFiPay',
+        type: 'customer-address',
+        version: 1,
+        customerId: trimmed,
+      }
+      : null;
+  }
+
   try {
-    const payload: unknown = JSON.parse(value);
+    const payload: unknown = JSON.parse(trimmed);
     if (
       typeof payload !== 'object' ||
       payload === null ||
@@ -39,7 +43,7 @@ export function parseCustomerAddressQr(value: string): CustomerAddressQrPayload 
       payload.version !== 1 ||
       !('customerId' in payload) ||
       typeof payload.customerId !== 'string' ||
-      !/^WFP-\d{6}$/.test(payload.customerId) ||
+      !payload.customerId.trim() ||
       !('name' in payload) ||
       typeof payload.name !== 'string' ||
       !payload.name.trim() ||
@@ -50,7 +54,8 @@ export function parseCustomerAddressQr(value: string): CustomerAddressQrPayload 
         (typeof payload.package !== 'string' || !payload.package.trim())) ||
       ('status' in payload &&
         payload.status !== 'Aktif' &&
-        payload.status !== 'Menunggu')
+        payload.status !== 'Menunggu' &&
+        payload.status !== 'Nonaktif')
     ) {
       return null;
     }

@@ -1,8 +1,9 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Ionicons } from '@expo/vector-icons';
 
+import RoleTabIcon from '../components/role-tab-icon';
+import { COLORS } from '../constants/theme';
 import LoginScreen from '../screens/LoginScreen';
 import PegawaiDashboardScreen from '../screens/pegawai/PegawaiDashboardScreen';
 import DataPelangganScreen from '../screens/pegawai/DataPelangganScreen';
@@ -17,47 +18,40 @@ import ProfilPelangganScreen from '../screens/pelanggan/ProfilScreen';
 import KeluhanPelangganScreen from '../screens/pelanggan/GangguanScreen';
 import GangguanPegawaiScreen from '../screens/pegawai/GangguanScreen';
 import AdminNavigator from './AdminNavigator';
-import type { RootStackParamList } from './types';
-import type { PegawaiTabParamList, PelangganTabParamList } from './types';
+import type { RootStackParamList, PegawaiTabParamList, PelangganTabParamList } from './types';
+import { createTabBarOptions } from './tabBarOptions';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const PegawaiTab = createBottomTabNavigator<PegawaiTabParamList>();
 const PelangganTab = createBottomTabNavigator<PelangganTabParamList>();
 
-const tabOptions = {
-  headerShown: false,
-  tabBarInactiveTintColor: '#94A3B8',
-  tabBarStyle: { height: 64, paddingBottom: 9, paddingTop: 7 },
-  tabBarLabelStyle: { fontSize: 11, fontWeight: '600' as const },
-};
-
 function PegawaiTabs() {
   return (
-    <PegawaiTab.Navigator screenOptions={{ ...tabOptions, tabBarActiveTintColor: '#2563EB' }}>
+    <PegawaiTab.Navigator screenOptions={createTabBarOptions(COLORS.pegawai)}>
       <PegawaiTab.Screen
         name="DashboardPegawai"
         component={PegawaiDashboardScreen}
-        options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Ionicons name="home-outline" size={size} color={color} /> }}
+        options={{ title: 'Home', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="home-outline" size={size} color={color} focused={focused} accentColor={COLORS.pegawai} /> }}
       />
       <PegawaiTab.Screen
         name="DataPelanggan"
         component={DataPelangganScreen}
-        options={{ title: 'Pelanggan', tabBarIcon: ({ color, size }) => <Ionicons name="people-outline" size={size} color={color} /> }}
+        options={{ title: 'Pelanggan', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="people-outline" size={size} color={color} focused={focused} accentColor={COLORS.pegawai} /> }}
       />
       <PegawaiTab.Screen
         name="GangguanPegawai"
         component={GangguanPegawaiScreen}
-        options={{ title: 'Gangguan', tabBarIcon: ({ color, size }) => <Ionicons name="warning-outline" size={size} color={color} /> }}
+        options={{ title: 'Gangguan', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="warning-outline" size={size} color={color} focused={focused} accentColor={COLORS.pegawai} /> }}
       />
       <PegawaiTab.Screen
         name="KunjunganPegawai"
         component={KunjunganScreen}
-        options={{ title: 'Kunjungan', tabBarIcon: ({ color, size }) => <Ionicons name="location-outline" size={size} color={color} /> }}
+        options={{ title: 'Kunjungan', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="location-outline" size={size} color={color} focused={focused} accentColor={COLORS.pegawai} /> }}
       />
       <PegawaiTab.Screen
         name="ProfilPegawai"
         component={ProfilPegawaiScreen}
-        options={{ title: 'Profil', tabBarIcon: ({ color, size }) => <Ionicons name="person-outline" size={size} color={color} /> }}
+        options={{ title: 'Profil', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="person-outline" size={size} color={color} focused={focused} accentColor={COLORS.pegawai} /> }}
       />
     </PegawaiTab.Navigator>
   );
@@ -65,31 +59,31 @@ function PegawaiTabs() {
 
 function PelangganTabs() {
   return (
-    <PelangganTab.Navigator screenOptions={{ ...tabOptions, tabBarActiveTintColor: '#0F766E' }}>
+    <PelangganTab.Navigator screenOptions={createTabBarOptions(COLORS.pelanggan)}>
       <PelangganTab.Screen
         name="HomePelanggan"
         component={PelangganHomeScreen}
-        options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Ionicons name="home-outline" size={size} color={color} /> }}
+        options={{ title: 'Home', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="home-outline" size={size} color={color} focused={focused} accentColor={COLORS.pelanggan} /> }}
       />
       <PelangganTab.Screen
         name="TagihanPelanggan"
         component={TagihanScreen}
-        options={{ title: 'Tagihan', tabBarIcon: ({ color, size }) => <Ionicons name="receipt-outline" size={size} color={color} /> }}
+        options={{ title: 'Tagihan', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="receipt-outline" size={size} color={color} focused={focused} accentColor={COLORS.pelanggan} /> }}
       />
       <PelangganTab.Screen
         name="RiwayatPembayaran"
         component={RiwayatPembayaranScreen}
-        options={{ title: 'Riwayat', tabBarIcon: ({ color, size }) => <Ionicons name="time-outline" size={size} color={color} /> }}
+        options={{ title: 'Riwayat', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="time-outline" size={size} color={color} focused={focused} accentColor={COLORS.pelanggan} /> }}
       />
       <PelangganTab.Screen
         name="KeluhanPelanggan"
         component={KeluhanPelangganScreen}
-        options={{ title: 'Keluhan', tabBarIcon: ({ color, size }) => <Ionicons name="chatbubble-ellipses-outline" size={size} color={color} /> }}
+        options={{ title: 'Keluhan', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="chatbubble-ellipses-outline" size={size} color={color} focused={focused} accentColor={COLORS.pelanggan} /> }}
       />
       <PelangganTab.Screen
         name="ProfilPelanggan"
         component={ProfilPelangganScreen}
-        options={{ title: 'Profil', tabBarIcon: ({ color, size }) => <Ionicons name="person-outline" size={size} color={color} /> }}
+        options={{ title: 'Profil', tabBarIcon: ({ color, size, focused }) => <RoleTabIcon name="person-outline" size={size} color={color} focused={focused} accentColor={COLORS.pelanggan} /> }}
       />
     </PelangganTab.Navigator>
   );
@@ -97,7 +91,17 @@ function PelangganTabs() {
 
 export default function AppNavigator() {
   return (
-    <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
+    <Stack.Navigator
+      initialRouteName="Login"
+      screenOptions={{
+        headerShown: false,
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#172B45',
+        headerTitleStyle: { fontWeight: '700' },
+        headerShadowVisible: false,
+        contentStyle: { backgroundColor: '#F7F9FC' },
+      }}
+    >
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Admin" component={AdminNavigator} />
       <Stack.Screen name="PegawaiTabs" component={PegawaiTabs} />

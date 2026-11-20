@@ -1,16 +1,19 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { Image, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { PelangganTabParamList } from '../../navigation/types';
-import { addComplaintReport, getComplaintReports, subscribeToComplaintReports } from '../../complaintStore';
-import { useSyncExternalStore } from 'react';
+import { addComplaintReport, getComplaintReports, loadComplaintReports, subscribeToComplaintReports } from '../../complaintStore';
+import { getApiErrorMessage } from '../../api';
+import { getCurrentCustomerId, getCurrentUser } from '../../auth/authService';
+import { getCustomer, loadCustomer, subscribeToCustomers } from '../../customerStore';
 
 type Props = BottomTabScreenProps<PelangganTabParamList, 'KeluhanPelanggan'>;
 type Category = 'Internet lambat' | 'Tidak ada koneksi' | 'Masalah router' | 'Lainnya';
 
-const categories: Array<{ label: Category; icon: keyof typeof Ionicons.glyphMap }> = [
+const categories: { label: Category; icon: keyof typeof Ionicons.glyphMap }[] = [
   { label: 'Internet lambat', icon: 'speedometer-outline' },
   { label: 'Tidak ada koneksi', icon: 'wifi-outline' },
   { label: 'Masalah router', icon: 'hardware-chip-outline' },
@@ -21,9 +24,27 @@ export default function GangguanScreen({ navigation }: Props) {
   const [category, setCategory] = useState<Category>('Internet lambat');
   const [detail, setDetail] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [photoFileName, setPhotoFileName] = useState<string | null>(null);
+  const [photoMimeType, setPhotoMimeType] = useState<string | undefined>();
   const [photoError, setPhotoError] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const complaints = useSyncExternalStore(subscribeToComplaintReports, getComplaintReports, getComplaintReports);
+  const customerId = getCurrentCustomerId();
+  const myComplaints = getCurrentUser()?.role === 'pelanggan'
+    ? complaints
+    : complaints.filter((complaint) => complaint.customerId === customerId);
+  const customer = useSyncExternalStore(
+    subscribeToCustomers,
+    () => getCustomer(customerId),
+    () => getCustomer(customerId),
+  );
+
+  useEffect(() => {
+    const requests: Promise<unknown>[] = [loadComplaintReports()];
+    if (customerId) requests.push(loadCustomer(customerId));
+    Promise.all(requests).catch((loadError: unknown) => setError(getApiErrorMessage(loadError)));
+  }, [customerId]);
 
   const pickPhoto = async () => {
     try {
@@ -40,7 +61,10 @@ export default function GangguanScreen({ navigation }: Props) {
         quality: 0.8,
       });
       if (!result.canceled && result.assets[0]) {
-        setPhotoUri(result.assets[0].uri);
+        const asset = result.assets[0];
+        setPhotoUri(asset.uri);
+        setPhotoFileName(asset.fileName ?? null);
+        setPhotoMimeType(asset.mimeType);
         setPhotoError('');
       }
     } catch {
@@ -48,30 +72,45 @@ export default function GangguanScreen({ navigation }: Props) {
     }
   };
 
-  const submitComplaint = () => {
+  const submitComplaint = async () => {
     if (detail.trim().length < 10) {
       setError('Jelaskan kendala minimal 10 karakter agar tim kami dapat membantu.');
       return;
     }
+    if (!customerId || !customer) {
+      setError('Data pelanggan tidak tersedia dari server. Silakan masuk kembali atau hubungi admin.');
+      return;
+    }
 
-    addComplaintReport({
-      category,
-      detail: detail.trim(),
-      customer: 'Budi Santoso',
-      customerId: 'WFP-008241',
-      address: 'Jl. Cikutra No. 12, Bandung',
-      createdAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }),
-      time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-      priority: 'Sedang',
-      photoUri,
-    });
-    setDetail('');
-    setPhotoUri(null);
+    setIsSubmitting(true);
     setError('');
+    try {
+      await addComplaintReport({
+        category,
+        detail: detail.trim(),
+        customer: customer.name,
+        customerId: customer.id,
+        address: customer.address,
+        createdAt: new Date().toISOString(),
+        time: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+        priority: 'Sedang',
+        photoUri,
+        photoFileName,
+        photoMimeType,
+      });
+      setDetail('');
+      setPhotoUri(null);
+      setPhotoFileName(null);
+      setPhotoMimeType(undefined);
+    } catch (submitError: unknown) {
+      setError(getApiErrorMessage(submitError));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View>
@@ -111,7 +150,15 @@ export default function GangguanScreen({ navigation }: Props) {
         {photoUri ? (
           <View style={styles.photoPreviewWrap}>
             <Image source={{ uri: photoUri }} style={styles.photoPreview} />
-            <TouchableOpacity accessibilityLabel="Hapus foto" onPress={() => setPhotoUri(null)} style={styles.removePhoto}>
+            <TouchableOpacity
+              accessibilityLabel="Hapus foto"
+              onPress={() => {
+                setPhotoUri(null);
+                setPhotoFileName(null);
+                setPhotoMimeType(undefined);
+              }}
+              style={styles.removePhoto}
+            >
               <Ionicons name="close" size={18} color="#FFFFFF" />
             </TouchableOpacity>
             <View style={styles.photoReadyBadge}>
@@ -155,16 +202,16 @@ export default function GangguanScreen({ navigation }: Props) {
           <Text style={styles.charCount}>{detail.length}/500</Text>
         </View>
 
-        <TouchableOpacity accessibilityRole="button" onPress={submitComplaint} style={styles.submitButton}>
-          <Text style={styles.submitText}>Kirim keluhan</Text>
+        <TouchableOpacity accessibilityRole="button" disabled={isSubmitting} onPress={submitComplaint} style={styles.submitButton}>
+          <Text style={styles.submitText}>{isSubmitting ? 'Mengirim...' : 'Kirim keluhan'}</Text>
           <Ionicons name="arrow-forward" size={17} color="#FFFFFF" />
         </TouchableOpacity>
 
         <View style={styles.historyHeader}>
           <Text style={styles.sectionTitle}>Laporan saya</Text>
-          <Text style={styles.reportCount}>{complaints.length} laporan</Text>
+          <Text style={styles.reportCount}>{myComplaints.length} laporan</Text>
         </View>
-        {complaints.map((complaint) => (
+        {myComplaints.map((complaint) => (
           <View key={complaint.id} style={styles.complaintCard}>
             <View style={styles.complaintTop}>
               <View style={styles.complaintIcon}>
@@ -193,7 +240,7 @@ export default function GangguanScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F5F8F8' },
+  safeArea: { flex: 1, backgroundColor: '#F7F9FC' },
   content: { paddingHorizontal: 18, paddingTop: 15, paddingBottom: 28 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15 },
   title: { color: '#17363B', fontSize: 21, fontWeight: '800' },

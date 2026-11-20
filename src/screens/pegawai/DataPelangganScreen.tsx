@@ -1,4 +1,4 @@
-import React, { useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,15 +8,17 @@ import {
   Image,
   Linking,
   Modal,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { parseCustomerAddressQr, type CustomerAddressQrPayload } from '../../customerQr';
+import { getApiErrorMessage } from '../../api';
 import {
   getCustomers,
+  loadCustomers,
   subscribeToCustomers,
   updateCustomerHomePhoto,
   type Customer,
@@ -30,6 +32,12 @@ export default function DataPelangganScreen() {
   const [scanError, setScanError] = useState('');
   const [scannedCustomer, setScannedCustomer] = useState<CustomerAddressQrPayload | null>(null);
   const hasScanned = useRef(false);
+
+  useEffect(() => {
+    loadCustomers().catch((error: unknown) => {
+      Alert.alert('Gagal memuat pelanggan', getApiErrorMessage(error));
+    });
+  }, []);
 
   const openScanner = async () => {
     setScanError('');
@@ -62,8 +70,20 @@ export default function DataPelangganScreen() {
       return;
     }
 
+    const customer = customers.find((item) => item.id === payload.customerId);
+    if (!customer && (!payload.name || !payload.address)) {
+      setScanError('Pelanggan tidak ditemukan di daftar. Muat ulang data lalu coba lagi.');
+      return;
+    }
+
     setScannerVisible(false);
-    setScannedCustomer(payload);
+    setScannedCustomer({
+      ...payload,
+      name: payload.name ?? customer?.name,
+      address: payload.address ?? customer?.address,
+      package: payload.package ?? customer?.package,
+      status: payload.status ?? customer?.status,
+    });
   };
 
   const chooseHomePhoto = async (customer: Customer) => {
@@ -85,11 +105,11 @@ export default function DataPelangganScreen() {
       });
       const photo = result.assets?.[0];
       if (!result.canceled && photo) {
-        updateCustomerHomePhoto(customer.id, photo.uri);
+        await updateCustomerHomePhoto(customer.id, photo.uri);
       }
     } catch (error) {
       console.error('Gagal membuka galeri foto rumah pelanggan:', error);
-      Alert.alert('Foto tidak dapat dipilih', 'Galeri tidak dapat dibuka. Periksa izin foto lalu coba lagi.');
+      Alert.alert('Gagal menyimpan foto rumah', getApiErrorMessage(error));
     }
   };
 
@@ -106,7 +126,7 @@ export default function DataPelangganScreen() {
     : null;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <Text style={styles.title}>Data Pelanggan</Text>
       <Text style={styles.subtitle}>Informasi alamat dan dokumentasi rumah pelanggan.</Text>
       <TouchableOpacity

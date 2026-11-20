@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Image,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Keyboard,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,9 +14,11 @@ import {
   useWindowDimensions,
   type TextInputInstance,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { authenticate } from '../auth/demoAccounts';
+import { getApiErrorMessage } from '../api';
+import { login } from '../auth/authService';
 import type { RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
@@ -26,6 +28,7 @@ export default function LoginScreen({ navigation }: Props) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const passwordInput = useRef<TextInputInstance>(null);
   const { height, width } = useWindowDimensions();
@@ -41,30 +44,33 @@ export default function LoginScreen({ navigation }: Props) {
     };
   }, []);
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
+    if (isSubmitting) return;
     if (!identifier.trim() || !password) {
-      setLoginError('Masukkan email/username dan password untuk melanjutkan.');
+      setLoginError('Masukkan email dan password untuk melanjutkan.');
       return;
     }
 
-    const user = authenticate(identifier, password);
-    if (!user) {
-      setLoginError('Email/username atau password tidak sesuai. Coba periksa kembali.');
-      return;
+    setIsSubmitting(true);
+    try {
+      const user = await login(identifier, password);
+      setLoginError('');
+      Keyboard.dismiss();
+      const destination = user.role === 'admin'
+        ? 'Admin'
+        : user.role === 'pegawai'
+          ? 'PegawaiTabs'
+          : 'PelangganTabs';
+      navigation.replace(destination);
+    } catch (error) {
+      setLoginError(getApiErrorMessage(error));
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setLoginError('');
-    Keyboard.dismiss();
-    const destination = user.role === 'admin'
-      ? 'Admin'
-      : user.role === 'pegawai'
-        ? 'PegawaiTabs'
-        : 'PelangganTabs';
-    navigation.replace(destination);
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
@@ -96,14 +102,14 @@ export default function LoginScreen({ navigation }: Props) {
               <Text style={styles.heading}>Selamat datang</Text>
               <Text style={styles.description}>Masuk untuk melanjutkan ke akun Anda.</Text>
 
-              <Text style={styles.label}>Email atau username</Text>
+              <Text style={styles.label}>Email</Text>
               <View style={styles.inputWrap}>
-                <Ionicons name="person-outline" size={19} color="#64748B" />
+                <Ionicons name="mail-outline" size={19} color="#64748B" />
                 <TextInput
-                  accessibilityLabel="Email atau username"
+                  accessibilityLabel="Email"
                   autoCapitalize="none"
                   autoCorrect={false}
-                  autoComplete="username"
+                  autoComplete="email"
                   placeholder="nama@email.com"
                   placeholderTextColor="#94A3B8"
                   returnKeyType="next"
@@ -144,18 +150,17 @@ export default function LoginScreen({ navigation }: Props) {
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity accessibilityRole="button" activeOpacity={0.85} onPress={handleLogin} style={styles.loginButton}>
-                <Text style={styles.loginText}>Masuk</Text>
-                <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+              <TouchableOpacity accessibilityRole="button" activeOpacity={0.85} onPress={handleLogin} disabled={isSubmitting} style={[styles.loginButton, isSubmitting && styles.loginButtonDisabled]}>
+                {isSubmitting ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Text style={styles.loginText}>Masuk</Text>
+                    <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+                  </>
+                )}
               </TouchableOpacity>
               {loginError ? <Text accessibilityRole="alert" style={styles.errorText}>{loginError}</Text> : null}
-              {!keyboardVisible && (
-                <>
-                  <Text style={styles.demoHint}>Demo Admin: admin / admin123</Text>
-                  <Text style={styles.demoHint}>Demo Pegawai: pegawai / pegawai123</Text>
-                  <Text style={styles.demoHint}>Demo Pelanggan: pelanggan / pelanggan123</Text>
-                </>
-              )}
             </View>
           </View>
         </ScrollView> 
@@ -165,7 +170,7 @@ export default function LoginScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F1F6FC' },
+  container: { flex: 1, backgroundColor: '#F7F9FC' },
   keyboardView: { flex: 1 },
   content: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 28 },
   compactContent: { paddingVertical: 12 },
@@ -184,7 +189,7 @@ const styles = StyleSheet.create({
   inputWrap: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#D9E2EC', borderRadius: 12, paddingHorizontal: 13, backgroundColor: '#FBFDFF', marginBottom: 17 },
   input: { flex: 1, color: '#0F172A', fontSize: 15, paddingVertical: 12 },
   loginButton: { minHeight: 52, marginTop: 6, backgroundColor: '#2563EB', borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 9 },
+  loginButtonDisabled: { opacity: 0.7 },
   loginText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
   errorText: { color: '#B42318', fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 12 },
-  demoHint: { color: '#94A3B8', fontSize: 11, textAlign: 'center', marginTop: 15 },
 });

@@ -1,11 +1,11 @@
-import React, { useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,15 +13,19 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   deleteFinanceTransaction,
   getFinanceTransactions,
+  loadFinanceTransactions,
   saveFinanceTransaction,
   subscribeToFinanceTransactions,
   type FinanceTransaction,
   type FinanceTransactionType,
 } from '../../financeStore';
+import { getApiErrorMessage } from '../../api';
 import { formatRupiah, useAdminInvoices } from './adminData';
+import { loadInvoices } from '../../paymentStore';
 
 type TransactionFilter = 'Semua' | FinanceTransactionType;
 
@@ -52,6 +56,19 @@ export default function KeuanganAdminScreen() {
   const [category, setCategory] = useState('');
   const [amount, setAmount] = useState('');
   const [formError, setFormError] = useState('');
+  const [loadingLocalTransactions, setLoadingLocalTransactions] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    loadFinanceTransactions()
+      .catch((error: unknown) => {
+        Alert.alert('Gagal memuat transaksi lokal', getApiErrorMessage(error));
+      })
+      .finally(() => setLoadingLocalTransactions(false));
+    loadInvoices().catch((error: unknown) => {
+      Alert.alert('Gagal memuat keuangan', getApiErrorMessage(error));
+    });
+  }, []);
 
   const invoiceIncome: LedgerEntry[] = invoices
     .filter((invoice) => invoice.status === 'Lunas')
@@ -111,7 +128,7 @@ export default function KeuanganAdminScreen() {
     setFormError('');
   };
 
-  const saveTransaction = () => {
+  const saveTransaction = async () => {
     const numericAmount = Number(amount.replace(/[^\d]/g, ''));
     if (!description.trim() || !category.trim() || !amount.trim()) {
       setFormError('Lengkapi keterangan, kategori, dan jumlah transaksi.');
@@ -122,14 +139,21 @@ export default function KeuanganAdminScreen() {
       return;
     }
 
-    saveFinanceTransaction({
-      ...(editingTransaction ? { id: editingTransaction.id } : {}),
-      description: description.trim(),
-      category: category.trim(),
-      amount: numericAmount,
-      type,
-    });
-    closeForm();
+    setSaving(true);
+    try {
+      await saveFinanceTransaction({
+        ...(editingTransaction ? { id: editingTransaction.id } : {}),
+        description: description.trim(),
+        category: category.trim(),
+        amount: numericAmount,
+        type,
+      });
+      closeForm();
+    } catch (error) {
+      setFormError(getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const confirmDelete = (transaction: FinanceTransaction) => {
@@ -141,17 +165,21 @@ export default function KeuanganAdminScreen() {
         {
           text: 'Hapus',
           style: 'destructive',
-          onPress: () => deleteFinanceTransaction(transaction.id),
+          onPress: () => {
+            deleteFinanceTransaction(transaction.id).catch((error: unknown) => {
+              Alert.alert('Gagal menghapus transaksi', getApiErrorMessage(error));
+            });
+          },
         },
       ],
     );
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Ringkasan keuangan</Text>
-        <Text style={styles.subtitle}>Catat dan kelola uang masuk maupun uang keluar.</Text>
+        <Text style={styles.subtitle}>Pembayaran dari server dan transaksi manual yang tersimpan di perangkat ini.</Text>
 
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo bersih tercatat</Text>
@@ -159,7 +187,6 @@ export default function KeuanganAdminScreen() {
           <View style={styles.balanceDivider} />
           <View style={styles.balanceFoot}>
             <Text style={styles.balanceNote}>{ledger.length} transaksi tercatat</Text>
-            <Text style={styles.demoBadge}>DATA DEMO</Text>
           </View>
         </View>
 
@@ -222,7 +249,9 @@ export default function KeuanganAdminScreen() {
           ))}
         </ScrollView>
 
-        {visibleLedger.length ? visibleLedger.map((entry) => {
+        {loadingLocalTransactions ? (
+          <ActivityIndicator color="#2563EB" style={styles.loading} />
+        ) : visibleLedger.length ? visibleLedger.map((entry) => {
           const isIncome = entry.type === 'Pemasukan';
           const editableTransaction = entry.editable
             ? manualTransactions.find((transaction) => transaction.id === entry.id)
@@ -279,7 +308,7 @@ export default function KeuanganAdminScreen() {
           </View>
         )}
         <Text style={styles.disclaimer}>
-          Transaksi manual disimpan di perangkat selama aplikasi berjalan. Pembayaran tagihan masuk tercatat otomatis.
+          Pembayaran tagihan dimuat dari server. Transaksi manual tersimpan hanya di perangkat ini dan tidak disinkronkan.
         </Text>
       </ScrollView>
 
@@ -384,11 +413,14 @@ export default function KeuanganAdminScreen() {
               <TouchableOpacity
                 accessibilityRole="button"
                 onPress={saveTransaction}
+                disabled={saving}
                 style={styles.saveButton}
               >
-                <Text style={styles.saveButtonText}>
-                  {editingTransaction ? 'Simpan perubahan' : 'Simpan transaksi'}
-                </Text>
+                {saving
+                  ? <ActivityIndicator color="#FFFFFF" />
+                  : <Text style={styles.saveButtonText}>
+                      {editingTransaction ? 'Simpan perubahan' : 'Simpan transaksi'}
+                    </Text>}
               </TouchableOpacity>
               <TouchableOpacity
                 accessibilityRole="button"
@@ -451,7 +483,6 @@ const styles = StyleSheet.create({
   balanceDivider: { height: 1, backgroundColor: '#FFFFFF38', marginVertical: 13 },
   balanceFoot: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   balanceNote: { color: '#E2ECFF', fontSize: 10, fontWeight: '600' },
-  demoBadge: { color: '#E2ECFF', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   summaryGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   summaryCard: { width: '48.5%', minHeight: 119, backgroundColor: '#FFFFFF', borderRadius: 15, padding: 13, borderWidth: 1, borderColor: '#EDF0F5' },
   summaryIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginBottom: 9 },
@@ -466,6 +497,7 @@ const styles = StyleSheet.create({
   expenseButton: { backgroundColor: '#C43D3D' },
   actionText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   count: { color: '#7B8797', fontSize: 11, fontWeight: '600' },
+  loading: { marginVertical: 28 },
   filters: { gap: 8, paddingTop: 2, paddingBottom: 12 },
   filter: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E5EAF1' },
   activeFilter: { backgroundColor: '#2563EB', borderColor: '#2563EB' },

@@ -1,24 +1,73 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { formatRupiah, useAdminInvoices } from './adminData';
+import { getApiErrorMessage } from '../../api';
+import { loadInvoices, verifyPayment } from '../../paymentStore';
 
-const filters = ['Semua', 'Belum Bayar', 'Lunas'] as const;
+const filters = ['Semua', 'Belum Bayar', 'Menunggu Verifikasi', 'Ditolak', 'Lunas'] as const;
 type Filter = (typeof filters)[number];
 
 export default function DataTagihanAdminScreen() {
   const [activeFilter, setActiveFilter] = useState<Filter>('Semua');
+  const [verifyingInvoiceId, setVerifyingInvoiceId] = useState<string | null>(null);
   const invoices = useAdminInvoices();
   const visibleInvoices = useMemo(
-    () => invoices.filter((invoice) => activeFilter === 'Semua' || invoice.status === activeFilter),
+    () => invoices.filter((invoice) => {
+      if (activeFilter === 'Semua') return true;
+      if (activeFilter === 'Menunggu Verifikasi' || activeFilter === 'Ditolak') {
+        return invoice.verificationStatus === activeFilter;
+      }
+      return invoice.status === activeFilter && invoice.verificationStatus === null;
+    }),
     [activeFilter, invoices],
   );
-  const unpaidTotal = invoices
-    .filter((invoice) => invoice.status === 'Belum Bayar')
+  useEffect(() => {
+    loadInvoices().catch((error: unknown) => {
+      Alert.alert('Gagal memuat tagihan', getApiErrorMessage(error));
+    });
+  }, []);
+  const unpaidInvoices = invoices.filter((invoice) =>
+    invoice.status === 'Belum Bayar' && invoice.verificationStatus !== 'Menunggu Verifikasi',
+  );
+  const unpaidTotal = unpaidInvoices
     .reduce((total, invoice) => total + invoice.amount, 0);
 
+  const runVerification = async (paymentId: string) => {
+    setVerifyingInvoiceId(paymentId);
+    try {
+      await verifyPayment(paymentId);
+    } catch (error) {
+      Alert.alert('Gagal memverifikasi pembayaran', getApiErrorMessage(error));
+      setVerifyingInvoiceId(null);
+      return;
+    }
+
+    try {
+      await loadInvoices();
+    } catch (error) {
+      Alert.alert(
+        'Pembayaran terverifikasi',
+        `Daftar tagihan gagal dimuat ulang. ${getApiErrorMessage(error)}`,
+      );
+    } finally {
+      setVerifyingInvoiceId(null);
+    }
+  };
+
+  const confirmVerification = (paymentId: string) => {
+    Alert.alert('Verifikasi pembayaran?', 'Pastikan pembayaran sudah diterima sebelum mengonfirmasi.', [
+      { text: 'Batal', style: 'cancel' },
+      {
+        text: 'Verifikasi',
+        onPress: () => void runVerification(paymentId),
+      },
+    ]);
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Tagihan bulanan</Text>
         <Text style={styles.subtitle}>Pantau tagihan pelanggan dan status pembayarannya.</Text>
@@ -31,7 +80,7 @@ export default function DataTagihanAdminScreen() {
             <Text style={styles.summaryLabel}>Total belum tertagih</Text>
             <Text style={styles.summaryAmount}>{formatRupiah(unpaidTotal)}</Text>
           </View>
-          <Text style={styles.summaryCount}>{invoices.filter((invoice) => invoice.status === 'Belum Bayar').length} tagihan</Text>
+          <Text style={styles.summaryCount}>{unpaidInvoices.length} tagihan</Text>
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
@@ -55,6 +104,9 @@ export default function DataTagihanAdminScreen() {
 
         {visibleInvoices.length ? visibleInvoices.map((invoice) => {
           const paid = invoice.status === 'Lunas';
+          const awaitingVerification = invoice.verificationStatus === 'Menunggu Verifikasi';
+          const rejected = invoice.verificationStatus === 'Ditolak';
+          const paymentId = invoice.paymentId;
           return (
             <View key={invoice.id} style={styles.card}>
               <View style={styles.cardTop}>
@@ -65,7 +117,12 @@ export default function DataTagihanAdminScreen() {
                   <Text style={styles.customerName}>{invoice.customerName}</Text>
                   <Text style={styles.invoiceId}>{invoice.id}</Text>
                 </View>
-                <Text style={[styles.status, paid ? styles.paidStatus : styles.unpaidStatus]}>{invoice.status}</Text>
+                <Text style={[
+                  styles.status,
+                  paid ? styles.paidStatus : awaitingVerification ? styles.pendingStatus : styles.unpaidStatus,
+                ]}>
+                  {invoice.verificationStatus ?? invoice.status}
+                </Text>
               </View>
               <View style={styles.divider} />
               <View style={styles.detailRow}>
@@ -81,6 +138,24 @@ export default function DataTagihanAdminScreen() {
                 <Text style={styles.amount}>{formatRupiah(invoice.amount)}</Text>
               </View>
               {invoice.paymentMethod ? <Text style={styles.paymentMethod}>Dibayar melalui {invoice.paymentMethod}</Text> : null}
+              {awaitingVerification && paymentId ? (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  disabled={verifyingInvoiceId !== null}
+                  onPress={() => confirmVerification(paymentId)}
+                  style={styles.verifyButton}
+                >
+                  <Text style={styles.verifyButtonText}>
+                    {verifyingInvoiceId === paymentId ? 'Memverifikasi…' : 'Verifikasi pembayaran'}
+                  </Text>
+                </TouchableOpacity>
+              ) : awaitingVerification ? (
+                <Text style={styles.pendingPayment}>ID pembayaran tidak tersedia untuk diverifikasi.</Text>
+              ) : rejected ? (
+                <Text style={styles.pendingPayment}>Pembayaran ditolak. Tunggu pelanggan mengirim pembayaran ulang.</Text>
+              ) : !paid ? (
+                <Text style={styles.pendingPayment}>Belum ada pembayaran masuk untuk diverifikasi.</Text>
+              ) : null}
             </View>
           );
         }) : (
@@ -89,7 +164,6 @@ export default function DataTagihanAdminScreen() {
             <Text style={styles.emptyText}>Tidak ada tagihan untuk filter ini.</Text>
           </View>
         )}
-        <Text style={styles.disclaimer}>Tagihan memakai data pelanggan demo dan tarif paket contoh.</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -122,6 +196,7 @@ const styles = StyleSheet.create({
   invoiceId: { color: '#98A3B2', fontSize: 10, marginTop: 3 },
   status: { overflow: 'hidden', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 5, fontSize: 10, fontWeight: '700' },
   paidStatus: { color: '#16804A', backgroundColor: '#E8F6EE' },
+  pendingStatus: { color: '#9A6B18', backgroundColor: '#FFF5E5' },
   unpaidStatus: { color: '#C43D3D', backgroundColor: '#FDECEC' },
   divider: { height: 1, backgroundColor: '#F1F4F8', marginVertical: 12 },
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
@@ -130,6 +205,9 @@ const styles = StyleSheet.create({
   amountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F1F4F8', paddingTop: 10, marginTop: 2 },
   amount: { color: '#172B45', fontSize: 15, fontWeight: '800' },
   paymentMethod: { color: '#16804A', fontSize: 10, marginTop: 8 },
+  verifyButton: { minHeight: 39, alignItems: 'center', justifyContent: 'center', backgroundColor: '#E8F6EE', borderRadius: 10, marginTop: 12 },
+  verifyButtonText: { color: '#16804A', fontSize: 11, fontWeight: '700' },
+  pendingPayment: { color: '#9A6B18', fontSize: 10, marginTop: 12, textAlign: 'center' },
   emptyState: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderRadius: 16, padding: 28, gap: 9 },
   emptyText: { color: '#718096', fontSize: 12 },
   disclaimer: { color: '#9AA6B5', fontSize: 10, lineHeight: 15, textAlign: 'center', marginTop: 10 },

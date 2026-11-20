@@ -1,22 +1,36 @@
-import React, { useSyncExternalStore } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native';
-import { CURRENT_CUSTOMER_ID, getInvoicePayment, subscribeToInvoicePayments } from '../../paymentStore';
+import React, { useEffect, useSyncExternalStore } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { getApiErrorMessage } from '../../api';
+import { getCurrentCustomerId } from '../../auth/authService';
+import { getCurrentInvoice, loadInvoices, subscribeToInvoices } from '../../paymentStore';
+import { formatRupiah } from '../admin/adminData';
 
 export default function TagihanScreen({ navigation }) {
-  const invoicePayment = useSyncExternalStore(
-    subscribeToInvoicePayments,
-    () => getInvoicePayment(CURRENT_CUSTOMER_ID),
+  const customerId = getCurrentCustomerId();
+  const invoice = useSyncExternalStore(
+    subscribeToInvoices,
+    () => getCurrentInvoice(customerId),
+    () => getCurrentInvoice(customerId),
   );
 
+  useEffect(() => {
+    loadInvoices().catch((error) => {
+      Alert.alert('Gagal memuat tagihan', getApiErrorMessage(error));
+    });
+  }, []);
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.container}>
       <View style={styles.card}>
         <Text style={styles.label}>Tagihan Bulan Ini</Text>
-        <Text style={styles.amount}>Rp 150.000</Text>
-        <Text style={styles.description}>Status: {invoicePayment ? 'Sudah dibayar' : 'Belum dibayar'}</Text>
-        {invoicePayment && <Text style={styles.method}>Metode: {invoicePayment.method}</Text>}
+        <Text style={styles.amount}>{invoice ? formatRupiah(invoice.amount) : '-'}</Text>
+        <Text style={styles.description}>
+          {invoice ? `${invoice.period} · ${invoice.status}` : 'Tagihan tidak tersedia'}
+        </Text>
+        {invoice?.paymentMethod && <Text style={styles.method}>Metode: {invoice.paymentMethod}</Text>}
 
-        {!invoicePayment && (
+        {invoice && invoice.status !== 'Lunas' && (
           <TouchableOpacity style={styles.payButton} onPress={() => navigation.navigate('BayarTagihan')}>
             <Text style={styles.payButtonText}>Bayar Sekarang</Text>
           </TouchableOpacity>

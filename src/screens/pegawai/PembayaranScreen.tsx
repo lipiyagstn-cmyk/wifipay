@@ -1,100 +1,55 @@
-import React, { useMemo, useState, useSyncExternalStore } from 'react';
-import { Image, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { confirmCashPayment, CURRENT_CUSTOMER_ID, getInvoicePayment, subscribeToInvoicePayments } from '../../paymentStore';
-import { getCustomers, subscribeToCustomers } from '../../customerStore';
+import { getApiErrorMessage } from '../../api';
+import { confirmCashPayment, getInvoices, loadInvoices, subscribeToInvoices } from '../../paymentStore';
+import type { AdminInvoice } from '../../paymentStore';
+import { formatRupiah } from '../admin/adminData';
 
-type PaymentStatus = 'Belum Bayar' | 'Menunggu' | 'Lunas';
-type CustomerPayment = {
-  id: string;
-  name: string;
-  address: string;
-  package: string;
-  amount: string;
-  dueDate: string;
-  phone: string;
-  photo: string;
-  status: PaymentStatus;
-};
+type PaymentStatus = 'Belum Bayar' | 'Lunas';
+type CustomerPayment = AdminInvoice;
 
-const initialPayments: CustomerPayment[] = [
-  {
-    id: 'WFP-008241',
-    name: 'Budi Santoso',
-    address: 'Jl. Cikutra Baru No. 18, Cibeunying, Bandung',
-    package: 'Home WiFi 20 Mbps',
-    amount: 'Rp 150.000',
-    dueDate: 'Jatuh tempo 5 Okt',
-    phone: '+62 812-3456-7890',
-    photo: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=700&q=80',
-    status: 'Belum Bayar',
-  },
-  {
-    id: 'WFP-007936',
-    name: 'Dewi Ayu',
-    address: 'Jl. Ir. H. Juanda No. 42, Dago, Bandung',
-    package: 'Home WiFi 30 Mbps',
-    amount: 'Rp 200.000',
-    dueDate: 'Jatuh tempo 7 Okt',
-    phone: '+62 813-7001-2554',
-    photo: 'https://images.unsplash.com/photo-1600047509807-ba8f99d2cdde?auto=format&fit=crop&w=700&q=80',
-    status: 'Menunggu',
-  },
-  {
-    id: 'WFP-006518',
-    name: 'Arman Hidayat',
-    address: 'Jl. Terusan Jakarta No. 105, Antapani, Bandung',
-    package: 'Home WiFi 10 Mbps',
-    amount: 'Rp 125.000',
-    dueDate: 'Jatuh tempo 10 Okt',
-    phone: '+62 857-2210-6741',
-    photo: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=700&q=80',
-    status: 'Belum Bayar',
-  },
-];
-
-const filters: Array<'Semua' | 'Belum Bayar' | 'Menunggu'> = ['Semua', 'Belum Bayar', 'Menunggu'];
+const filters: ('Semua' | 'Belum Bayar' | 'Lunas')[] = ['Semua', 'Belum Bayar', 'Lunas'];
 
 const statusPalette: Record<PaymentStatus, { foreground: string; background: string }> = {
   'Belum Bayar': { foreground: '#C43D3D', background: '#FDECEC' },
-  Menunggu: { foreground: '#A96A08', background: '#FFF4D9' },
   Lunas: { foreground: '#16804A', background: '#E8F6EE' },
 };
 
 export default function PembayaranScreen() {
-  const [payments, setPayments] = useState(initialPayments);
   const [activeFilter, setActiveFilter] = useState<(typeof filters)[number]>('Semua');
   const [selectedPayment, setSelectedPayment] = useState<CustomerPayment | null>(null);
-  const currentCustomerPayment = useSyncExternalStore(
-    subscribeToInvoicePayments,
-    () => getInvoicePayment(CURRENT_CUSTOMER_ID),
-  );
-  const customers = useSyncExternalStore(subscribeToCustomers, getCustomers, getCustomers);
-  const customerPhotoById = useMemo(
-    () => new Map(customers.map((customer) => [customer.id, customer.homePhotoUri])),
-    [customers],
-  );
-  const syncedPayments = useMemo(
-    () => payments.map((payment) => payment.id === CURRENT_CUSTOMER_ID && currentCustomerPayment
-      ? { ...payment, status: 'Lunas' as const }
-      : payment),
-    [currentCustomerPayment, payments],
-  );
+  const [isPaying, setIsPaying] = useState(false);
+  const payments = useSyncExternalStore(subscribeToInvoices, getInvoices, getInvoices);
+  const syncedPayments = useMemo(() => payments, [payments]);
   const pendingCount = syncedPayments.filter((payment) => payment.status !== 'Lunas').length;
   const visiblePayments = useMemo(
     () => syncedPayments.filter((payment) => activeFilter === 'Semua' || payment.status === activeFilter),
     [activeFilter, syncedPayments],
   );
 
-  const markAsPaid = () => {
-    if (!selectedPayment) return;
-    confirmCashPayment(selectedPayment.id);
-    setPayments((current) => current.map((item) => item.id === selectedPayment.id ? { ...item, status: 'Lunas' } : item));
-    setSelectedPayment(null);
+  useEffect(() => {
+    loadInvoices().catch((error: unknown) => {
+      Alert.alert('Gagal memuat tagihan', getApiErrorMessage(error));
+    });
+  }, []);
+
+  const markAsPaid = async () => {
+    if (!selectedPayment || isPaying) return;
+    setIsPaying(true);
+    try {
+      await confirmCashPayment(selectedPayment.id);
+      setSelectedPayment(null);
+    } catch (error) {
+      Alert.alert('Gagal mencatat pembayaran', getApiErrorMessage(error));
+    } finally {
+      setIsPaying(false);
+    }
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View>
@@ -114,7 +69,7 @@ export default function PembayaranScreen() {
             <Text style={styles.summaryCaption}>Tagihan perlu ditindaklanjuti</Text>
             <Text style={styles.summaryValue}>{pendingCount} pelanggan</Text>
           </View>
-          <Text style={styles.summaryPeriod}>SEPT 2026</Text>
+          <Text style={styles.summaryPeriod}>{payments[0]?.period.toUpperCase() ?? ''}</Text>
         </View>
 
         <View style={styles.listHeader}>
@@ -141,31 +96,39 @@ export default function PembayaranScreen() {
           return (
             <View key={payment.id} style={styles.customerCard}>
               <View style={styles.customerTop}>
-                <Image source={{ uri: customerPhotoById.get(payment.id) ?? payment.photo }} style={styles.housePhoto} />
+                {payment.customerPhotoUri ? (
+                  <Image source={{ uri: payment.customerPhotoUri }} style={styles.housePhoto} />
+                ) : (
+                  <View style={[styles.housePhoto, styles.photoPlaceholder]}>
+                    <Ionicons name="home-outline" size={28} color="#94A3B8" />
+                  </View>
+                )}
                 <View style={styles.customerInfo}>
                   <View style={[styles.statusBadge, { backgroundColor: palette.background }]}>
                     <Text style={[styles.statusText, { color: palette.foreground }]}>{payment.status}</Text>
                   </View>
-                  <Text style={styles.customerName} numberOfLines={1}>{payment.name}</Text>
-                  <Text style={styles.customerId}>{payment.id}</Text>
+                  <Text style={styles.customerName} numberOfLines={1}>{payment.customerName}</Text>
+                  <Text style={styles.customerId}>{payment.customerId}</Text>
                   <View style={styles.packageRow}>
                     <Ionicons name="wifi-outline" size={14} color="#6D7F91" />
-                    <Text style={styles.packageText} numberOfLines={1}>{payment.package}</Text>
+                    <Text style={styles.packageText} numberOfLines={1}>{payment.packageName || 'Paket belum diatur'}</Text>
                   </View>
                 </View>
               </View>
 
               <View style={styles.addressRow}>
                 <Ionicons name="location-outline" size={17} color="#2563EB" />
-                <Text style={styles.addressText}>{payment.address}</Text>
+                <Text style={styles.addressText}>{payment.customerAddress}</Text>
               </View>
 
               <View style={styles.billRow}>
                 <View>
                   <Text style={styles.amountLabel}>Tagihan bulan ini</Text>
-                  <Text style={styles.amount}>{payment.amount}</Text>
+                  <Text style={styles.amount}>{formatRupiah(payment.amount)}</Text>
                 </View>
-                <Text style={styles.dueDate}>{payment.dueDate}</Text>
+                <Text style={styles.dueDate}>
+                  {payment.dueDate ? `Jatuh tempo ${payment.dueDate}` : 'Jatuh tempo belum diatur'}
+                </Text>
               </View>
 
               {payment.status !== 'Lunas' ? (
@@ -199,10 +162,10 @@ export default function PembayaranScreen() {
             </View>
             <Text style={styles.confirmTitle}>Konfirmasi pembayaran</Text>
             <Text style={styles.confirmDescription}>
-              Konfirmasi menerima tunai {selectedPayment?.amount} dari {selectedPayment?.name}?
+              Konfirmasi menerima tunai {selectedPayment ? formatRupiah(selectedPayment.amount) : ''} dari {selectedPayment?.customerName}?
             </Text>
-            <TouchableOpacity accessibilityRole="button" onPress={markAsPaid} style={styles.confirmButton}>
-              <Text style={styles.confirmButtonText}>Ya, tunai diterima</Text>
+            <TouchableOpacity accessibilityRole="button" onPress={markAsPaid} disabled={isPaying} style={styles.confirmButton}>
+              <Text style={styles.confirmButtonText}>{isPaying ? 'Menyimpan...' : 'Ya, tunai diterima'}</Text>
             </TouchableOpacity>
             <TouchableOpacity accessibilityRole="button" onPress={() => setSelectedPayment(null)} style={styles.cancelButton}>
               <Text style={styles.cancelButtonText}>Batal</Text>
@@ -215,7 +178,7 @@ export default function PembayaranScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F4F7FB' },
+  safeArea: { flex: 1, backgroundColor: '#F7F9FC' },
   content: { paddingHorizontal: 18, paddingTop: 15, paddingBottom: 28 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 17 },
   title: { color: '#172F49', fontSize: 21, fontWeight: '800' },
@@ -238,6 +201,7 @@ const styles = StyleSheet.create({
   customerCard: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E8EDF3', padding: 12, marginBottom: 12 },
   customerTop: { flexDirection: 'row', gap: 12 },
   housePhoto: { width: 104, height: 112, borderRadius: 12, backgroundColor: '#E5EAF0' },
+  photoPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   customerInfo: { flex: 1, justifyContent: 'center', minWidth: 0 },
   statusBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 16, marginBottom: 7 },
   statusText: { fontSize: 9, fontWeight: '700' },

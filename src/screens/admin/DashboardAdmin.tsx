@@ -1,28 +1,35 @@
-import React, { useSyncExternalStore } from 'react';
+import React, { useEffect, useSyncExternalStore } from 'react';
 import {
-  SafeAreaView,
   ScrollView,
+  Alert,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import type { NavigationProp } from '@react-navigation/native';
+import type { CompositeScreenProps, NavigationProp } from '@react-navigation/native';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { AdminStackParamList } from '../../navigation/adminTypes';
+import type { AdminStackParamList, AdminTabParamList } from '../../navigation/adminTypes';
 import type { RootStackParamList } from '../../navigation/types';
-import { getCustomers, subscribeToCustomers } from '../../customerStore';
-import { getEmployees, subscribeToEmployees } from '../../employeeStore';
+import { api, getApiErrorMessage } from '../../api';
+import { getCurrentUser, logout } from '../../auth/authService';
+import { getCustomers, loadCustomers, subscribeToCustomers } from '../../customerStore';
+import { getEmployees, loadEmployees, subscribeToEmployees } from '../../employeeStore';
 import { formatRupiah, useAdminInvoices } from './adminData';
+import { loadInvoices } from '../../paymentStore';
 
-type Props = NativeStackScreenProps<AdminStackParamList, 'DashboardAdmin'>;
+type Props = CompositeScreenProps<
+  BottomTabScreenProps<AdminTabParamList, 'DashboardAdmin'>,
+  NativeStackScreenProps<AdminStackParamList>
+>;
 
 const shortcuts = [
-  { title: 'Data Pelanggan', subtitle: 'Profil dan status pelanggan', icon: 'people-outline' as const, color: '#2563EB', background: '#EAF2FF', route: 'DataPelangganAdmin' as const },
-  { title: 'Data Pegawai', subtitle: 'Tim dan area layanan', icon: 'briefcase-outline' as const, color: '#7C3AED', background: '#F2EBFF', route: 'DataPegawaiAdmin' as const },
-  { title: 'Data Tagihan', subtitle: 'Status pembayaran bulanan', icon: 'receipt-outline' as const, color: '#D97706', background: '#FFF5E5', route: 'DataTagihanAdmin' as const },
-  { title: 'Keuangan', subtitle: 'Pemasukan dan piutang', icon: 'wallet-outline' as const, color: '#059669', background: '#E7F7F1', route: 'KeuanganAdmin' as const },
+  { title: 'Paket Internet', subtitle: 'Kelola nama dan harga paket', icon: 'wifi-outline' as const, color: '#0F766E', background: '#E7F7F1', route: 'PaketAdmin' as const },
+  { title: 'Laporan', subtitle: 'Ringkasan laporan operasional', icon: 'bar-chart-outline' as const, color: '#7C3AED', background: '#F2EBFF', route: 'LaporanAdmin' as const },
+  { title: 'Pengaduan', subtitle: 'Tinjau dan tindak lanjuti keluhan', icon: 'chatbubble-ellipses-outline' as const, color: '#DC4C4C', background: '#FFF0F0', route: 'PengaduanAdmin' as const },
 ];
 
 export default function DashboardAdmin({ navigation }: Props) {
@@ -34,57 +41,82 @@ export default function DashboardAdmin({ navigation }: Props) {
   const outstanding = invoices
     .filter((invoice) => invoice.status === 'Belum Bayar')
     .reduce((total, invoice) => total + invoice.amount, 0);
-  const rootNavigation = navigation.getParent<NavigationProp<RootStackParamList>>();
+  const rootNavigation = navigation.getParent()
+    ?.getParent<NavigationProp<RootStackParamList>>();
+  const adminNavigation = navigation.getParent<NavigationProp<AdminStackParamList>>();
+  const user = getCurrentUser();
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/admin/dashboard'),
+      loadCustomers(),
+      loadEmployees(),
+      loadInvoices(),
+    ]).catch((error: unknown) => {
+      Alert.alert('Gagal memuat dashboard', getApiErrorMessage(error));
+    });
+  }, []);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>WIFIPAY · ADMIN</Text>
-            <Text style={styles.greeting}>Dashboard</Text>
-            <Text style={styles.subtitle}>Pantau operasional layanan internet Anda.</Text>
+            <Text style={styles.greeting}>Hai, {user?.name ?? 'Admin'} 👋</Text>
+            <Text style={styles.subtitle}>Selamat datang kembali</Text>
           </View>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Keluar"
-            onPress={() => rootNavigation?.reset({ index: 0, routes: [{ name: 'Login' }] })}
-            style={styles.logoutButton}
-          >
-            <Ionicons name="log-out-outline" size={20} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.financeCard}>
-          <View style={styles.financeTop}>
-            <View>
-              <Text style={styles.financeLabel}>Uang masuk tercatat</Text>
-              <Text style={styles.financeAmount}>{formatRupiah(collected)}</Text>
-            </View>
-            <View style={styles.financeIcon}>
-              <Ionicons name="trending-up-outline" size={21} color="#FFFFFF" />
-            </View>
-          </View>
-          <View style={styles.financeDivider} />
-          <View style={styles.financeBottom}>
-            <Text style={styles.financeFootnote}>{paidInvoices.length} tagihan lunas</Text>
-            <Text style={styles.financeFootnote}>Belum tertagih {formatRupiah(outstanding)}</Text>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Notifikasi"
+              onPress={() => adminNavigation?.navigate('NotifikasiAdmin')}
+              style={styles.headerActionButton}
+            >
+              <Ionicons name="notifications-outline" size={21} color="#2563EB" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Keluar"
+              onPress={() => {
+                logout();
+                rootNavigation?.reset({ index: 0, routes: [{ name: 'Login' }] });
+              }}
+              style={styles.headerActionButton}
+            >
+              <Ionicons name="log-out-outline" size={21} color="#475569" />
+            </TouchableOpacity>
           </View>
         </View>
 
-        <View style={styles.sectionHeading}>
-          <Text style={styles.sectionTitle}>Ringkasan</Text>
-          <Text style={styles.demoBadge}>DATA DEMO</Text>
-        </View>
         <View style={styles.statsGrid}>
+          <View style={styles.summaryHeading}>
+            <Text style={styles.sectionTitle}>Ringkasan hari ini</Text>
+            <Text style={styles.sectionCaption}>{new Date().toLocaleDateString('id-ID')}</Text>
+          </View>
+          <View style={styles.financeCard}>
+            <View style={styles.financeTop}>
+              <View>
+                <Text style={styles.financeLabel}>Uang masuk</Text>
+                <Text style={styles.financeAmount}>{formatRupiah(collected)}</Text>
+              </View>
+              <View style={styles.financeIcon}>
+                <Ionicons name="trending-up-outline" size={22} color="#FFFFFF" />
+              </View>
+            </View>
+            <View style={styles.financeDivider} />
+            <View style={styles.financeBottom}>
+              <Text style={styles.financeFootnote}>{paidInvoices.length} tagihan lunas</Text>
+              <Text style={styles.financeFootnote}>Belum tertagih {formatRupiah(outstanding)}</Text>
+            </View>
+          </View>
           <SummaryCard icon="people-outline" label="Pelanggan" value={`${customers.length}`} detail="terdaftar" tint="#2563EB" background="#EAF2FF" />
           <SummaryCard icon="briefcase-outline" label="Pegawai" value={`${employees.length}`} detail="tim layanan" tint="#7C3AED" background="#F2EBFF" />
           <SummaryCard icon="receipt-outline" label="Tagihan" value={`${invoices.length}`} detail="periode ini" tint="#D97706" background="#FFF5E5" />
-          <SummaryCard icon="alert-circle-outline" label="Belum lunas" value={`${invoices.length - paidInvoices.length}`} detail="perlu ditindaklanjuti" tint="#DC4C4C" background="#FFF0F0" />
+          <SummaryCard icon="alert-circle-outline" label="Belum lunas" value={`${invoices.length - paidInvoices.length}`} detail="tagihan aktif" tint="#DC4C4C" background="#FFF0F0" />
         </View>
 
         <View style={styles.sectionHeading}>
-          <Text style={styles.sectionTitle}>Menu admin</Text>
+          <Text style={styles.sectionTitle}>Akses cepat</Text>
         </View>
         <View style={styles.shortcutList}>
           {shortcuts.map((shortcut) => (
@@ -106,33 +138,6 @@ export default function DashboardAdmin({ navigation }: Props) {
           ))}
         </View>
 
-        <View style={styles.sectionHeading}>
-          <Text style={styles.sectionTitle}>Tagihan terbaru</Text>
-          <TouchableOpacity
-            accessibilityRole="button"
-            onPress={() => navigation.navigate('DataTagihanAdmin')}
-          >
-            <Text style={styles.seeAll}>Lihat semua</Text>
-          </TouchableOpacity>
-        </View>
-        {invoices.slice(0, 3).map((invoice) => (
-          <View key={invoice.id} style={styles.invoiceRow}>
-            <View style={styles.invoiceIcon}>
-              <Ionicons name="receipt-outline" size={18} color="#52647A" />
-            </View>
-            <View style={styles.invoiceCopy}>
-              <Text style={styles.invoiceName}>{invoice.customerName}</Text>
-              <Text style={styles.invoiceMeta}>{invoice.id} · {invoice.dueDate}</Text>
-            </View>
-            <View style={styles.invoiceAmountCopy}>
-              <Text style={styles.invoiceAmount}>{formatRupiah(invoice.amount)}</Text>
-              <Text style={[styles.invoiceStatus, invoice.status === 'Lunas' ? styles.paidText : styles.unpaidText]}>
-                {invoice.status}
-              </Text>
-            </View>
-          </View>
-        ))}
-        <Text style={styles.disclaimer}>Ringkasan menggunakan data demo lokal, bukan laporan server.</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -167,26 +172,28 @@ function SummaryCard({
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#F7F9FC' },
-  content: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 32 },
-  header: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 },
+  content: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 },
   headerCopy: { flex: 1, paddingRight: 12 },
-  eyebrow: { color: '#2563EB', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
-  greeting: { color: '#172B45', fontSize: 28, fontWeight: '800', marginTop: 5 },
-  subtitle: { color: '#718096', fontSize: 13, marginTop: 4, lineHeight: 19 },
-  logoutButton: { width: 42, height: 42, borderRadius: 13, backgroundColor: '#1D4ED8', alignItems: 'center', justifyContent: 'center' },
-  financeCard: { backgroundColor: '#1D4ED8', borderRadius: 20, padding: 18, marginBottom: 23, shadowColor: '#1D4ED8', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 14, elevation: 4 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  headerActionButton: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E6EBF2' },
+  greeting: { color: '#14243A', fontSize: 23, fontWeight: '800' },
+  subtitle: { color: '#718096', fontSize: 14, marginTop: 5 },
+  logoutButton: { width: 42, height: 42, borderRadius: 13, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E6EBF2' },
+  financeCard: { width: '100%', backgroundColor: '#1D4ED8', borderRadius: 19, padding: 18, marginBottom: 12, shadowColor: '#1D4ED8', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.18, shadowRadius: 14, elevation: 4 },
   financeTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   financeLabel: { color: '#D8E6FF', fontSize: 12, fontWeight: '600' },
   financeAmount: { color: '#FFFFFF', fontSize: 26, fontWeight: '800', marginTop: 6 },
   financeIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: '#FFFFFF24', alignItems: 'center', justifyContent: 'center' },
   financeDivider: { height: 1, backgroundColor: '#FFFFFF38', marginVertical: 15 },
   financeBottom: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  financeFootnote: { color: '#E2ECFF', fontSize: 11, fontWeight: '600' },
-  sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 2 },
+  financeFootnote: { color: '#E2ECFF', fontSize: 10, fontWeight: '600', flexShrink: 1 },
+  sectionHeading: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, marginTop: 2 },
   sectionTitle: { color: '#172B45', fontSize: 17, fontWeight: '800' },
-  demoBadge: { color: '#64748B', backgroundColor: '#E9EEF5', overflow: 'hidden', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 20 },
-  statCard: { width: '48.3%', minHeight: 137, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#EDF0F5' },
+  sectionCaption: { color: '#8794A7', fontSize: 11 },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 13 },
+  summaryHeading: { width: '100%', flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 },
+  statCard: { width: '48.2%', minHeight: 146, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14, marginBottom: 11, borderWidth: 1, borderColor: '#EDF0F5' },
   statIcon: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   statValue: { color: '#172B45', fontSize: 23, fontWeight: '800' },
   statLabel: { color: '#4B5B70', fontSize: 12, fontWeight: '700', marginTop: 2 },

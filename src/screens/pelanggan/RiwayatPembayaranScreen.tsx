@@ -1,6 +1,11 @@
-import React from 'react';
+import React, { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { getApiErrorMessage } from '../../api';
+import { getCurrentCustomerId, getCurrentUser } from '../../auth/authService';
+import { getInvoices, loadInvoices, subscribeToInvoices } from '../../paymentStore';
+import { formatRupiah } from '../admin/adminData';
 
 type PaymentStatus = 'Berhasil' | 'Menunggu' | 'Belum Bayar';
 
@@ -13,41 +18,6 @@ type PaymentTransaction = {
   status: PaymentStatus;
 };
 
-const transactions: PaymentTransaction[] = [
-  {
-    id: 'TRX-WFP-260926-0841',
-    date: '26 Sep 2026, 09.14',
-    period: 'September 2026',
-    amount: 'Rp 150.000',
-    method: 'QRIS',
-    status: 'Berhasil',
-  },
-  {
-    id: 'TRX-WFP-250926-0712',
-    date: '25 Sep 2026, 16.32',
-    period: 'September 2026',
-    amount: 'Rp 150.000',
-    method: 'Transfer bank',
-    status: 'Menunggu',
-  },
-  {
-    id: 'INV-WFP-2608-008241',
-    date: '5 Agu 2026, 08.00',
-    period: 'Agustus 2026',
-    amount: 'Rp 150.000',
-    method: 'Belum dipilih',
-    status: 'Belum Bayar',
-  },
-  {
-    id: 'TRX-WFP-030826-0285',
-    date: '3 Agu 2026, 10.05',
-    period: 'Juli 2026',
-    amount: 'Rp 150.000',
-    method: 'QRIS',
-    status: 'Berhasil',
-  },
-];
-
 const statusStyles: Record<PaymentStatus, { color: string; background: string; icon: keyof typeof Ionicons.glyphMap }> = {
   Berhasil: { color: '#16804A', background: '#E9F7EF', icon: 'checkmark-circle' },
   Menunggu: { color: '#A96A08', background: '#FFF4D9', icon: 'time' },
@@ -55,8 +25,35 @@ const statusStyles: Record<PaymentStatus, { color: string; background: string; i
 };
 
 export default function RiwayatPembayaranScreen() {
+  const customerId = getCurrentCustomerId();
+  const allInvoices = useSyncExternalStore(subscribeToInvoices, getInvoices, getInvoices);
+  const invoices = useMemo(
+    () => getCurrentUser()?.role === 'pelanggan'
+      ? allInvoices
+      : customerId
+        ? allInvoices.filter((invoice) => invoice.customerId === customerId)
+        : [],
+    [allInvoices, customerId],
+  );
+  const transactions: PaymentTransaction[] = invoices.map((invoice) => ({
+    id: invoice.id,
+    date: invoice.paidAt
+      ? new Date(invoice.paidAt).toLocaleString('id-ID')
+      : '-',
+    period: invoice.period,
+    amount: formatRupiah(invoice.amount),
+    method: invoice.paymentMethod ?? '-',
+    status: invoice.status === 'Lunas' ? 'Berhasil' : 'Belum Bayar',
+  }));
+
+  useEffect(() => {
+    loadInvoices().catch((error: unknown) => {
+      Alert.alert('Gagal memuat riwayat pembayaran', getApiErrorMessage(error));
+    });
+  }, []);
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.title}>Riwayat Pembayaran</Text>
@@ -75,7 +72,7 @@ export default function RiwayatPembayaranScreen() {
         </View>
 
         <Text style={styles.listHeading}>Transaksi terbaru</Text>
-        {transactions.map((transaction) => {
+        {transactions.length ? transactions.map((transaction) => {
           const status = statusStyles[transaction.status];
 
           return (
@@ -99,7 +96,7 @@ export default function RiwayatPembayaranScreen() {
               <TransactionDetail icon="barcode-outline" label="ID transaksi" value={transaction.id} />
             </View>
           );
-        })}
+        }) : <Text style={styles.emptyState}>Belum ada riwayat tagihan.</Text>}
       </ScrollView>
     </SafeAreaView>
   );
@@ -118,7 +115,7 @@ function TransactionDetail({ icon, label, value }: { icon: keyof typeof Ionicons
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F5F8F8' },
+  safeArea: { flex: 1, backgroundColor: '#F7F9FC' },
   content: { paddingHorizontal: 18, paddingTop: 15, paddingBottom: 28 },
   header: { marginBottom: 18 },
   title: { color: '#17363B', fontSize: 22, fontWeight: '800' },
@@ -142,4 +139,5 @@ const styles = StyleSheet.create({
   detailIcon: { width: 22, alignItems: 'flex-start' },
   detailLabel: { color: '#82908F', fontSize: 10, flex: 1 },
   detailValue: { color: '#425957', fontSize: 10, fontWeight: '600', textAlign: 'right', maxWidth: '58%' },
+  emptyState: { color: '#82908F', textAlign: 'center', paddingVertical: 28 },
 });

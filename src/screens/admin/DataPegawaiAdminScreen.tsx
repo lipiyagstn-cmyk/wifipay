@@ -1,9 +1,9 @@
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import {
   Alert,
   Modal,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,24 +15,42 @@ import {
   createEmployee,
   deleteEmployee,
   getEmployees,
+  loadEmployees,
   subscribeToEmployees,
   updateEmployee,
   type Employee,
 } from '../../employeeStore';
+import { getApiErrorMessage } from '../../api';
 
-export default function DataPegawaiAdminScreen() {
+export default function DataPegawaiAdminScreen({ applySafeArea = true }: { applySafeArea?: boolean }) {
   const employees = useSyncExternalStore(subscribeToEmployees, getEmployees, getEmployees);
+  const safeAreaEdges: Edge[] = applySafeArea ? ['top', 'left', 'right'] : [];
   const [formVisible, setFormVisible] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
   const [position, setPosition] = useState('');
   const [area, setArea] = useState('');
-  const [status, setStatus] = useState<Employee['status']>('Aktif');
+  const [status, setStatus] = useState<'Aktif' | 'Nonaktif'>('Aktif');
   const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    loadEmployees().catch((error: unknown) => {
+      Alert.alert('Gagal memuat pegawai', getApiErrorMessage(error));
+    });
+  }, []);
 
   const openNewEmployee = () => {
     setEditingEmployee(null);
     setName('');
+    setEmail('');
+    setPassword('');
+    setPhone('');
+    setAddress('');
     setPosition('');
     setArea('');
     setStatus('Aktif');
@@ -43,31 +61,50 @@ export default function DataPegawaiAdminScreen() {
   const openEditEmployee = (employee: Employee) => {
     setEditingEmployee(employee);
     setName(employee.name);
+    setEmail('');
+    setPassword('');
+    setPhone('');
+    setAddress('');
     setPosition(employee.position);
     setArea(employee.area);
-    setStatus(employee.status);
+    setStatus(employee.status === 'Nonaktif' ? 'Nonaktif' : 'Aktif');
     setFormError('');
     setFormVisible(true);
   };
 
-  const saveEmployee = () => {
+  const saveEmployee = async () => {
     if (!name.trim() || !position.trim() || !area.trim()) {
       setFormError('Nama, jabatan, dan area layanan wajib diisi.');
+      return;
+    }
+    if (!editingEmployee && (!email.trim() || !email.includes('@') || password.length < 8)) {
+      setFormError('Masukkan email yang valid dan kata sandi minimal 8 karakter.');
       return;
     }
 
     const employeeData = {
       name: name.trim(),
+      email: email.trim(),
+      password,
+      phone: phone.trim(),
+      address: address.trim(),
       position: position.trim(),
       area: area.trim(),
       status,
     };
-    if (editingEmployee) {
-      updateEmployee(editingEmployee.id, employeeData);
-    } else {
-      createEmployee(employeeData);
+    setSaving(true);
+    try {
+      if (editingEmployee) {
+        await updateEmployee(editingEmployee.id, employeeData);
+      } else {
+        await createEmployee(employeeData);
+      }
+      setFormVisible(false);
+    } catch (error) {
+      setFormError(getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
     }
-    setFormVisible(false);
   };
 
   const confirmDelete = (employee: Employee) => {
@@ -76,13 +113,21 @@ export default function DataPegawaiAdminScreen() {
       `Data ${employee.name} akan dihapus dari daftar pegawai.`,
       [
         { text: 'Batal', style: 'cancel' },
-        { text: 'Hapus', style: 'destructive', onPress: () => deleteEmployee(employee.id) },
+        {
+          text: 'Hapus',
+          style: 'destructive',
+          onPress: () => {
+            deleteEmployee(employee.id).catch((error: unknown) => {
+              Alert.alert('Gagal menghapus pegawai', getApiErrorMessage(error));
+            });
+          },
+        },
       ],
     );
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={safeAreaEdges} style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.heading}>
           <View style={styles.headingCopy}>
@@ -167,7 +212,7 @@ export default function DataPegawaiAdminScreen() {
             <Text style={styles.emptyText}>Belum ada data pegawai.</Text>
           </View>
         )}
-        <Text style={styles.disclaimer}>Data disimpan lokal di perangkat selama aplikasi berjalan.</Text>
+        <Text style={styles.disclaimer}>Data pegawai dimuat dan disimpan melalui server.</Text>
       </ScrollView>
 
       <Modal
@@ -199,6 +244,59 @@ export default function DataPegawaiAdminScreen() {
                 style={styles.input}
                 value={name}
               />
+              {!editingEmployee ? (
+                <>
+                  <Text style={styles.fieldLabel}>Email</Text>
+                  <TextInput
+                    accessibilityLabel="Email pegawai"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    onChangeText={setEmail}
+                    placeholder="nama@email.com"
+                    placeholderTextColor="#94A3B8"
+                    style={styles.input}
+                    value={email}
+                  />
+                  <Text style={styles.fieldLabel}>Password</Text>
+                  <TextInput
+                    accessibilityLabel="Password pegawai"
+                    autoCapitalize="none"
+                    onChangeText={setPassword}
+                    placeholder="Minimal 8 karakter"
+                    placeholderTextColor="#94A3B8"
+                    secureTextEntry
+                    style={styles.input}
+                    value={password}
+                  />
+                </>
+              ) : null}
+              <Text style={styles.fieldLabel}>Nomor HP</Text>
+              <TextInput
+                accessibilityLabel="Nomor HP pegawai"
+                keyboardType="phone-pad"
+                onChangeText={setPhone}
+                placeholder="08xxxxxxxxxx"
+                placeholderTextColor="#94A3B8"
+                style={styles.input}
+                value={phone}
+              />
+              <Text style={styles.fieldLabel}>Alamat</Text>
+              <TextInput
+                accessibilityLabel="Alamat pegawai"
+                autoCapitalize="sentences"
+                multiline
+                onChangeText={setAddress}
+                placeholder="Alamat pegawai"
+                placeholderTextColor="#94A3B8"
+                style={[styles.input, styles.multilineInput]}
+                value={address}
+              />
+              {!editingEmployee ? (
+                <>
+                  <Text style={styles.fieldLabel}>Role</Text>
+                  <View style={styles.roleBadge}><Text style={styles.roleText}>Pegawai</Text></View>
+                </>
+              ) : null}
               <Text style={styles.fieldLabel}>Jabatan</Text>
               <TextInput
                 accessibilityLabel="Jabatan pegawai"
@@ -234,8 +332,8 @@ export default function DataPegawaiAdminScreen() {
                 ))}
               </View>
               {formError ? <Text accessibilityRole="alert" style={styles.formError}>{formError}</Text> : null}
-              <TouchableOpacity accessibilityRole="button" onPress={saveEmployee} style={styles.saveButton}>
-                <Text style={styles.saveButtonText}>{editingEmployee ? 'Simpan perubahan' : 'Simpan pegawai'}</Text>
+              <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={() => void saveEmployee()} style={[styles.saveButton, saving && styles.disabledButton]}>
+                <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : editingEmployee ? 'Simpan perubahan' : 'Simpan pegawai'}</Text>
               </TouchableOpacity>
               <TouchableOpacity accessibilityRole="button" onPress={() => setFormVisible(false)} style={styles.cancelButton}>
                 <Text style={styles.cancelText}>Batal</Text>
@@ -294,11 +392,15 @@ const styles = StyleSheet.create({
   closeButton: { width: 33, height: 33, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F5F9', borderRadius: 11 },
   fieldLabel: { color: '#334155', fontSize: 11, fontWeight: '700', marginBottom: 6 },
   input: { minHeight: 42, borderWidth: 1, borderColor: '#D9E2EC', borderRadius: 10, paddingHorizontal: 11, color: '#172B45', fontSize: 12, marginBottom: 13, backgroundColor: '#FBFDFF' },
+  multilineInput: { minHeight: 68, paddingTop: 10, textAlignVertical: 'top' },
   choiceRow: { flexDirection: 'row', gap: 7, marginBottom: 14 },
   choice: { flex: 1, minHeight: 37, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0' },
   selectedChoice: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
   choiceText: { color: '#64748B', fontSize: 10, fontWeight: '700' },
   selectedChoiceText: { color: '#FFFFFF' },
+  roleBadge: { alignSelf: 'flex-start', borderRadius: 9, backgroundColor: '#EFF6FF', paddingHorizontal: 12, paddingVertical: 8, marginBottom: 13 },
+  roleText: { color: '#2563EB', fontSize: 11, fontWeight: '700' },
+  disabledButton: { opacity: 0.6 },
   formError: { color: '#B42318', fontSize: 11, marginBottom: 8 },
   saveButton: { minHeight: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: '#2563EB', borderRadius: 11, marginTop: 3 },
   saveButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
